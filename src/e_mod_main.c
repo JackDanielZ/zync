@@ -53,22 +53,16 @@ typedef struct
 
 static E_Module *_module = NULL;
 
-typedef struct
+static Eina_Bool
+_mkdir(const char *dir)
 {
-   Eina_Stringshare *name;
-   Eina_Stringshare *command;
-   Instance *inst;
-
-   Ecore_Exe *exe;
-} Image_Info;
-
-typedef struct
-{
-   Eina_Stringshare *name;
-   Eina_Stringshare *id;
-   Eina_Stringshare *default_image;
-   Eina_List *images; /* List of Image_Info */
-} Device_Info;
+   if (!ecore_file_exists(dir))
+     {
+        Eina_Bool success = ecore_file_mkdir(dir);
+        if (!success) return EINA_FALSE;
+     }
+   return EINA_TRUE;
+}
 
 static int
 _printf(const char *fmt, ...)
@@ -100,30 +94,22 @@ _cmd_end_cb(void *data, int type EINA_UNUSED, void *event)
 {
    Ecore_Exe_Event_Del *event_info = (Ecore_Exe_Event_Del *)event;
    Ecore_Exe *exe = event_info->exe;
-   Image_Info *img = ecore_exe_data_get(exe);
-   if (!img || img->inst != data) return ECORE_CALLBACK_PASS_ON;
-   PRINT("EXE END %p\n", img->exe);
+   Instance *inst = ecore_exe_data_get(exe);
+   if (!inst || inst != data) return ECORE_CALLBACK_PASS_ON;
+   PRINT("EXE END %p\n", exe);
    return ECORE_CALLBACK_DONE;
 }
 
 static Eina_Bool
-_cmd_output_cb(void *data, int type, void *event)
+_cmd_output_cb(void *data, int type EINA_UNUSED, void *event)
 {
-   char buf_icon[1024];
-   char output_buf[1024];
    Ecore_Exe_Event_Data *event_data = (Ecore_Exe_Event_Data *)event;
-   const char *begin = event_data->data;
+   const char *str = event_data->data;
    Ecore_Exe *exe = event_data->exe;
-   Image_Info *img = ecore_exe_data_get(exe);
-   if (!img || img->inst != data) return ECORE_CALLBACK_PASS_ON;
+   Instance *inst = ecore_exe_data_get(exe);
+   if (!inst || inst != data) return ECORE_CALLBACK_PASS_ON;
 
-   snprintf(buf_icon, sizeof(buf_icon), "%s/icon.png", e_module_dir_get(_module));
-   PRINT(begin);
-
-   if (type == ECORE_EXE_EVENT_ERROR)
-      sprintf(output_buf, "<color=#F00>%s</color>", begin);
-   else
-      sprintf(output_buf, "<color=#0F0>%s</color>", begin);
+   PRINT("%*s", event_data->size, str);
 
    return ECORE_CALLBACK_DONE;
 }
@@ -201,7 +187,7 @@ _button_cb_mouse_down(void *data, Evas *e EINA_UNUSED, Evas_Object *obj EINA_UNU
    inst = data;
    ev = event_info;
 
-   if (ev->button == 3)
+   if (ev->button == 1)
      {
         Eina_List *itr, *itr2;
         Repo *r;
@@ -243,6 +229,9 @@ _gc_init(E_Gadcon *gc, const char *name, const char *id, const char *style)
    E_Gadcon_Client *gcc;
    char buf[4096];
 
+   sprintf(buf, "%s/zync", efreet_config_home_get());
+   _mkdir(buf);
+
    inst = _instance_create();
 
    snprintf(buf, sizeof(buf), "%s/icon.png", e_module_dir_get(_module));
@@ -256,12 +245,13 @@ _gc_init(E_Gadcon *gc, const char *name, const char *id, const char *style)
    evas_object_event_callback_add(inst->o_icon, EVAS_CALLBACK_MOUSE_DOWN,
 				  _button_cb_mouse_down, inst);
 
-   inst->sync_exe = ecore_exe_pipe_run("zync --daemon", ECORE_EXE_PIPE_READ | ECORE_EXE_PIPE_ERROR, inst);
-   efl_wref_add(inst->sync_exe, &(inst->sync_exe));
-
    ecore_event_handler_add(ECORE_EXE_EVENT_DATA, _cmd_output_cb, inst);
    ecore_event_handler_add(ECORE_EXE_EVENT_ERROR, _cmd_output_cb, inst);
    ecore_event_handler_add(ECORE_EXE_EVENT_DEL, _cmd_end_cb, inst);
+
+   inst->sync_exe = ecore_exe_pipe_run("zync daemon", ECORE_EXE_PIPE_READ | ECORE_EXE_PIPE_ERROR, inst);
+   PRINT("EXE %p\n", inst->sync_exe);
+   efl_wref_add(inst->sync_exe, &(inst->sync_exe));
 
    return gcc;
 }
@@ -269,7 +259,9 @@ _gc_init(E_Gadcon *gc, const char *name, const char *id, const char *style)
 static void
 _gc_shutdown(E_Gadcon_Client *gcc)
 {
-   _instance_delete(gcc->data);
+   Instance *inst = gcc->data;
+   ecore_exe_kill(inst->sync_exe);
+   _instance_delete(inst);
 }
 
 static void
