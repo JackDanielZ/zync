@@ -1,0 +1,243 @@
+#!/bin/sh
+
+# $1: push/status
+# $2: repo
+# $3: remote when push
+
+# Repo: Films encData (Autres, Photos...)
+# Remote: zotac yoga z2 zen eyoman
+
+# A .zync file must be present in the user home directory of each machine:
+# encData /media/Storage/encData
+# Films * /media/Storage/Films (* indicates master)
+
+TMP=/tmp/zync
+
+prg=$0
+check=0
+use_cache=0
+timer=""
+daemon_pids=""
+
+function usage
+{
+   echo "Usage $prg [-c/--check] [--cached] [--timer loop_time] push/status/daemon [repo] [remote]"
+}
+
+function daemon_clean_up {
+
+   for pid in $daemon_pids
+   do
+      kill $pid 2> /dev/null
+   done
+}
+
+function getBaseRepo
+{
+   ssh $1 cat ~/.zync | grep $2 | awk '{print $NF}'
+}
+
+function retrieveServersInfos
+{
+   if [ $use_cache -eq 0 ]
+   then
+      rm -rf $TMP
+      mkdir -p $TMP
+
+      if [ ! -f ~/.zync_servers ]
+      then
+         echo "File .zync_servers missing in user home directory"
+         exit -1
+      fi
+
+      pids=""
+      for server in `cat ~/.zync_servers`
+      do
+         rm -f $TMP/$server
+         ssh $server 'cat .zync' > $TMP/mach_$server &
+         pids="$pids $!"
+      done
+      for pid in $pids
+      do
+         wait $pid
+      done
+   fi
+}
+
+function pushRepo
+{
+   repo=$1
+   src_mach=$2
+   dest_mach=$3
+
+   source_path=$(getBaseRepo $src_mach $repo)
+   if [ -z "$source_path" ]
+   then
+      echo "The repo $repo is missing in the machine $src_mach"
+      exit -1
+   fi
+
+   dest_path=$(getBaseRepo $remote $repo)
+   if [ -z "$dest_path" ]
+   then
+      echo "Wrong destination or the repo $repo is missing in the machine $dest_mach"
+      exit -1
+   fi
+
+   if [ $check -eq 1 ]
+   then
+      cmd="--dry-run $cmd"
+   fi
+
+   cmd="rsync -avzhP --delete-after $cmd $source_path/ $dest_mach:$dest_path 2> /dev/null"
+
+   echo $cmd
+   $cmd
+}
+
+while [ "$1" != "" ];
+do
+   case $1 in
+      -c | --check )
+         check=1
+         ;;
+      push | status | daemon)
+         action=$1
+         ;;
+      --cached )
+         use_cache=1
+         ;;
+      --timer )
+         shift
+         timer=$1
+         ;;
+      -h | --help )
+         usage
+         exit
+         ;;
+      * )
+         repo=$1
+         if [ $action != "status" ]
+         then
+            shift
+            remote=$1
+         fi
+         ;;
+   esac
+   shift
+done
+
+if [ -z "$action" ]
+then
+   echo "Missing action"
+   usage
+   exit -1
+fi
+
+if [ $action == "push" ]
+then
+   if [ -z "$repo" -o -z "$remote" ]
+   then
+      echo "Missing parameters"
+      usage
+      exit -1
+   fi
+
+   pushRepo $repo localhost $remote
+elif [ $action == "status" ]
+then
+   retrieveServersInfos
+   if [ -z "$repo" ]
+   then
+      repos=`cat $TMP/mach_* | awk '{print $1}' | sort | uniq`
+   else
+      repos=$repo
+   fi
+   loop_exit=0
+   while [ $loop_exit -eq 0 ]
+   do
+      for r in $repos
+      do
+         pids=""
+         master=`grep $r $TMP/mach_* | grep \* | tr ':_' '  ' | awk '{print $2}'`
+         machs=`grep $r $TMP/mach_* | grep -v $master | tr ':_' '  ' | awk '{print $2}'`
+         src_path=`cat $TMP/mach_$master | grep $r | awk '{print $3}'`
+         src_exists=`ssh $master ls $src_path/.zync_flag 2> /dev/null`
+         st="| $r: $master"
+         if [ -z "$src_exists" ]
+         then
+            st="$st(X)"
+         else
+            st="$st(*)"
+         fi
+         for mach in $machs
+         do
+            dst_path=`cat $TMP/mach_$mach | grep $r | awk '{print $2}'`
+            dst_exists=`ssh $mach ls $dst_path/.zync_flag 2> /dev/null`
+            if [ -z "$dst_exists" -o -z "$src_exists" ]
+            then
+               st="$st $mach(X)"
+            else
+               ssh $master "rsync -ai --delete-after --dry-run $src_path/ $mach:$dst_path" > $TMP/dry_$master_$mach 2> /dev/null &
+               pids="$pids $!"
+            fi
+         done
+         for pid in $pids
+         do
+            wait $pid
+         done
+         for mach in $machs
+         do
+            is_done=`echo $st | grep " $mach("`
+            if [ -z "$is_done" ]
+            then
+               st="$st $mach"
+               nb=`cat $TMP/dry_$master_$mach | wc -l`
+               if [ $? -ne 0 ]
+               then
+                  st="$st(?)"
+               else
+                  if [ $nb -ne 0 ]
+                  then
+                     st="$st(!)"
+                  else
+                     st="$st(V)"
+                  fi
+               fi
+            fi
+         done
+         echo "$st |"
+      done
+      if [ ! -z "$timer" ]
+      then
+         sleep $timer
+      else
+         loop_exit=1
+      fi
+   done
+elif [ $action == "daemon" ]
+then
+   retrieveServersInfos
+   repos=`cat $TMP/mach_* | awk '{print $1}' | sort | uniq`
+   daemon_pids=""
+   trap daemon_clean_up SIGHUP SIGINT SIGTERM
+   for r in $repos
+   do
+      t=`grep $r /tmp/zync/mach_* | grep \* | awk '{print $2}' | tr "\*()" "   "`
+      if [ ! -z $t ]
+      then
+         t="--timer $t"
+      fi
+      $prg --cached $t status $r &
+      daemon_pids="$daemon_pids $!"
+   done
+   while read line
+   do
+      echo "$line"
+   done < /dev/stdin
+   daemon_clean_up
+   for pid in $daemon_pids
+   do
+      wait $pid
+   done
+fi
