@@ -18,10 +18,11 @@ check=0
 use_cache=0
 timer=""
 daemon_pids=""
+ppid=0
 
 function usage
 {
-   echo "Usage $prg [-c/--check] [--cached] [--timer loop_time] push/status/daemon [repo] [remote]"
+   echo "Usage $prg [-c/--check] [--cached] [--timer loop_time] [--ppid parent_pid] push/status/daemon [repo] [remote]"
 }
 
 function daemon_clean_up {
@@ -110,6 +111,10 @@ do
       --timer )
          shift
          timer=$1
+         ;;
+      --ppid )
+         shift
+         ppid=$1
          ;;
       -h | --help )
          usage
@@ -208,7 +213,10 @@ then
          done
          echo "$st |"
       done
-      if [ ! -z "$timer" ]
+      [ $ppid -eq 0 ] || kill -0 $ppid || loop_exit=1
+      echo $ppid >> /tmp/toto
+      echo $loop_exit >> /tmp/toto
+      if [ $loop_exit == 0 -a ! -z "$timer" ]
       then
          sleep $timer
       else
@@ -228,14 +236,9 @@ then
       then
          t="--timer $t"
       fi
-      $prg --cached $t status $r &
+      $prg --ppid $$ --cached $t status $r &
       daemon_pids="$daemon_pids $!"
    done
-   while read line
-   do
-      echo "$line"
-   done < /dev/stdin
-   daemon_clean_up
    for pid in $daemon_pids
    do
       wait $pid
