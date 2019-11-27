@@ -96,7 +96,7 @@ _cmd_end_cb(void *data, int type EINA_UNUSED, void *event)
    Ecore_Exe *exe = event_info->exe;
    Instance *inst = ecore_exe_data_get(exe);
    if (!inst || inst != data) return ECORE_CALLBACK_PASS_ON;
-   PRINT("EXE END %p\n", exe);
+   PRINT("EXE END %p - Code %d\n", exe, event_info->exit_code);
    return ECORE_CALLBACK_DONE;
 }
 
@@ -249,7 +249,9 @@ _gc_init(E_Gadcon *gc, const char *name, const char *id, const char *style)
    ecore_event_handler_add(ECORE_EXE_EVENT_ERROR, _cmd_output_cb, inst);
    ecore_event_handler_add(ECORE_EXE_EVENT_DEL, _cmd_end_cb, inst);
 
-   inst->sync_exe = ecore_exe_pipe_run("zync daemon", ECORE_EXE_PIPE_READ | ECORE_EXE_PIPE_ERROR, inst);
+   inst->sync_exe = ecore_exe_pipe_run("zync daemon",
+         ECORE_EXE_PIPE_READ | ECORE_EXE_PIPE_ERROR | ECORE_EXE_USE_SH,
+         inst);
    PRINT("EXE %p\n", inst->sync_exe);
    efl_wref_add(inst->sync_exe, &(inst->sync_exe));
 
