@@ -249,7 +249,7 @@ _gc_init(E_Gadcon *gc, const char *name, const char *id, const char *style)
    ecore_event_handler_add(ECORE_EXE_EVENT_ERROR, _cmd_output_cb, inst);
    ecore_event_handler_add(ECORE_EXE_EVENT_DEL, _cmd_end_cb, inst);
 
-   inst->sync_exe = ecore_exe_pipe_run("zync daemon",
+   inst->sync_exe = ecore_exe_pipe_run("zync --delim daemon",
          ECORE_EXE_PIPE_READ | ECORE_EXE_PIPE_ERROR | ECORE_EXE_USE_SH,
          inst);
    PRINT("EXE %p\n", inst->sync_exe);

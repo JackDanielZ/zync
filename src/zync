@@ -19,10 +19,11 @@ use_cache=0
 timer=""
 daemon_pids=""
 ppid=0
+use_delim=0
 
 function usage
 {
-   echo "Usage $prg [-c/--check] [--cached] [--timer loop_time] [--ppid parent_pid] push/status/daemon [repo] [remote]"
+   echo "Usage $prg [-c/--check] [--cached] [--delim] [--timer loop_time] [--ppid parent_pid] push/status/daemon [repo] [remote]"
 }
 
 function daemon_clean_up {
@@ -112,6 +113,9 @@ do
          shift
          timer=$1
          ;;
+      --delim )
+         use_delim=1
+         ;;
       --ppid )
          shift
          ppid=$1
@@ -168,7 +172,11 @@ then
          machs=`grep $r $TMP/mach_* | grep -v $master | tr ':_' '  ' | awk '{print $2}'`
          src_path=`cat $TMP/mach_$master | grep $r | awk '{print $3}'`
          src_exists=`ssh $master ls $src_path/.zync_flag 2> /dev/null`
-         st="| $r: $master"
+         if [ $use_delim -eq 1 ]
+         then
+            st="{ "
+         fi
+         st="$st$r: $master"
          if [ -z "$src_exists" ]
          then
             st="$st(X)"
@@ -211,7 +219,11 @@ then
                fi
             fi
          done
-         echo "$st |"
+         if [ $use_delim -eq 1 ]
+         then
+            st="$st }"
+         fi
+         echo "$st"
       done
       [ $ppid -eq 0 ] || kill -0 $ppid || loop_exit=1
       echo $ppid >> /tmp/toto
@@ -235,6 +247,10 @@ then
       if [ ! -z $t ]
       then
          t="--timer $t"
+      fi
+      if [ $use_delim -eq 1 ]
+      then
+         t="--delim $t"
       fi
       $prg --ppid $$ --cached $t status $r &
       daemon_pids="$daemon_pids $!"
