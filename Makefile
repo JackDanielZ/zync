@@ -17,7 +17,7 @@ install: src/module.so src/zync
 	sudo mkdir -p $(prefix)'/lib/enlightenment/modules/zync/'$(MODULE_ARCH)
 	sudo install -c src/module.so $(prefix)/lib/enlightenment/modules/zync/$(MODULE_ARCH)/module.so
 	sudo install -c module.desktop $(prefix)/lib/enlightenment/modules/zync/module.desktop
-	sudo install -c -m 644 images/icon.png $(prefix)/lib/enlightenment/modules/zync
+	sudo install -c -m 644 images/*.png $(prefix)/lib/enlightenment/modules/zync/
 	sudo install -c -m 755 src/zync /$(prefix)/bin/
 
 clean:

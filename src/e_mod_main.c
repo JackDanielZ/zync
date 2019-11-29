@@ -253,6 +253,19 @@ _instance_delete(Instance *inst)
    free(inst);
 }
 
+static const char *
+_status_icon_get(Sync_Status status)
+{
+   switch (status)
+     {
+      case SYNC_OK: return "v_green.png";
+      case SYNC_NEEDED: return "excl_orange.png";
+      case SYNC_NO_DIR: return "x_red.png";
+      case SYNC_FAILED: return "question_red.png";
+     }
+   return NULL;
+}
+
 static void
 _button_cb_mouse_down(void *data, Evas *e EINA_UNUSED, Evas_Object *obj EINA_UNUSED, void *event_info)
 {
@@ -264,6 +277,7 @@ _button_cb_mouse_down(void *data, Evas *e EINA_UNUSED, Evas_Object *obj EINA_UNU
 
    if (ev->button == 1)
      {
+        char buf[1024];
         Eina_List *itr, *itr2;
         Repo *r;
         E_Menu *m, *m2;
@@ -272,6 +286,7 @@ _button_cb_mouse_down(void *data, Evas *e EINA_UNUSED, Evas_Object *obj EINA_UNU
         m = e_menu_new();
         EINA_LIST_FOREACH(inst->repos, itr, r)
           {
+             Sync_Status repo_status = r->master_dir_ok ? SYNC_OK : SYNC_NO_DIR;
              Repo_Mach *rmach;
              E_Menu_Item *mi, *mi2;
              char lb_text[256];
@@ -285,10 +300,20 @@ _button_cb_mouse_down(void *data, Evas *e EINA_UNUSED, Evas_Object *obj EINA_UNU
                }
              EINA_LIST_FOREACH(r->machs, itr2, rmach)
                {
+                  const char *icon_name = _status_icon_get(rmach->status);
                   mi2 = e_menu_item_new(m2);
                   e_menu_item_label_set(mi2, rmach->name);
+                  if (icon_name)
+                    {
+                       snprintf(buf, sizeof(buf), "%s/%s", e_module_dir_get(_module), icon_name);
+                       e_menu_item_icon_file_set(mi2, buf);
+                    }
+                  if (repo_status < rmach->status) repo_status = rmach->status;
 //                  e_menu_item_callback_set(mi2, _image_selected, dev);
                }
+
+             snprintf(buf, sizeof(buf), "%s/%s", e_module_dir_get(_module), _status_icon_get(repo_status));
+             e_menu_item_icon_file_set(mi, buf);
           }
 
         m = e_gadcon_client_util_menu_items_append(inst->gcc, m, 0);
