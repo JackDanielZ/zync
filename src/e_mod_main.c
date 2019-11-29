@@ -44,6 +44,7 @@ typedef struct
 {
    E_Gadcon_Client *gcc;
    Evas_Object *o_icon;
+   E_Menu *menu;
 
    Ecore_Exe *sync_exe;
    Eina_List *repos; /* List of Repo */
@@ -109,8 +110,82 @@ _cmd_output_cb(void *data, int type EINA_UNUSED, void *event)
    Instance *inst = ecore_exe_data_get(exe);
    if (!inst || inst != data) return ECORE_CALLBACK_PASS_ON;
 
-   PRINT("%*s", event_data->size, str);
+   PRINT("%d %s\n", __LINE__, str);
+   while (str && *str != '\0')
+     {
+        Eina_List *itr;
+        Repo *r;
+        char *end, *tmp;
+        Eina_Bool master_done = EINA_FALSE;
+        str = strchr(str, '{');
+        if (!str) goto end;
+        str++;
+        while (*str == ' ') str++;
 
+        /* Find } and check no more { before */
+        end = strchr(str, '}');
+        if (!end) goto end;
+        end--;
+        while (*end == ' ') end--;
+        tmp = strchr(str, '{');
+        if (tmp && tmp <= end) goto end;
+
+        /* Find repo name */
+        tmp = strchr(str, ':');
+        if (!tmp || str == tmp) goto end;
+        EINA_LIST_FOREACH(inst->repos, itr, r)
+           if (!strncmp(r->name, str, tmp - str)) goto repo_found;
+        r = calloc(1, sizeof(*r));
+        r->name = eina_stringshare_add_length(str, tmp - str);
+        inst->repos = eina_list_append(inst->repos, r);
+
+repo_found:
+        str = tmp + 1;
+        while (str < end)
+          {
+             Repo_Mach *m;
+             char status;
+
+             while (*str == ' ') str++;
+             tmp = strchr(str, '(');
+             if (!tmp || str == tmp) goto end;
+             status = *(tmp + 1);
+             if (*(tmp + 2) != ')') goto end;
+
+             if (!master_done)
+               {
+                  if (!r->master_name || strncmp(r->master_name, str, tmp - str))
+                    {
+                       eina_stringshare_del(r->master_name);
+                       r->master_name = eina_stringshare_add_length(str, tmp - str);
+                    }
+                  r->master_dir_ok = (status == '*');
+                  master_done = EINA_TRUE;
+               }
+             else
+               {
+                  EINA_LIST_FOREACH(r->machs, itr, m)
+                     if (!strncmp(m->name, str, tmp - str)) goto mach_found;
+
+                  m = calloc(1, sizeof(*m));
+                  m->name = eina_stringshare_add_length(str, tmp - str);
+                  r->machs = eina_list_append(r->machs, m);
+
+mach_found:
+                  switch (status)
+                    {
+                     case 'V': m->status = SYNC_OK; break;
+                     case '!': m->status = SYNC_NEEDED; break;
+                     case 'X': m->status = SYNC_NO_DIR; break;
+                     case '?': m->status = SYNC_FAILED; break;
+                     default: goto end;
+                    }
+               }
+             str = tmp + 2 + 1;
+          }
+     }
+
+end:
    return ECORE_CALLBACK_DONE;
 }
 
@@ -203,8 +278,11 @@ _button_cb_mouse_down(void *data, Evas *e EINA_UNUSED, Evas_Object *obj EINA_UNU
              sprintf(lb_text, "%s (%s)", r->name, r->master_name);
              mi = e_menu_item_new(m);
              e_menu_item_label_set(mi, lb_text);
-             m2 = e_menu_new();
-             e_menu_item_submenu_set(mi, m2);
+             if (r->machs)
+               {
+                  m2 = e_menu_new();
+                  e_menu_item_submenu_set(mi, m2);
+               }
              EINA_LIST_FOREACH(r->machs, itr2, rmach)
                {
                   mi2 = e_menu_item_new(m2);
