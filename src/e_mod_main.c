@@ -316,7 +316,6 @@ _button_cb_mouse_down(void *data, Evas *e EINA_UNUSED, Evas_Object *obj EINA_UNU
              e_menu_item_icon_file_set(mi, buf);
           }
 
-        m = e_gadcon_client_util_menu_items_append(inst->gcc, m, 0);
         e_gadcon_canvas_zone_geometry_get(inst->gcc->gadcon, &x, &y, NULL, NULL);
         e_menu_activate_mouse(m,
               e_zone_current_get(),
