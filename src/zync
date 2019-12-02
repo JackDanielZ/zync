@@ -91,7 +91,7 @@ function pushRepo
       cmd="--dry-run $cmd"
    fi
 
-   cmd="rsync -avzhP --delete-after $cmd $source_path/ $dest_mach:$dest_path 2> /dev/null"
+   cmd="rsync -avzhP --delete-after $cmd $source_path/ $dest_mach:$dest_path"
 
    echo $cmd
    $cmd

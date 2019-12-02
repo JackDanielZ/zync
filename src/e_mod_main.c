@@ -28,9 +28,14 @@ typedef enum
 
 typedef struct
 {
-   Eina_Stringshare *name;
-   Sync_Status status;
-} Repo_Mach;
+   E_Gadcon_Client *gcc;
+   Evas_Object *o_icon;
+   E_Menu *menu;
+
+   Eina_List *repos; /* List of Repo */
+   Ecore_Exe *daemon_exe;
+   Ecore_Exe *sync_exe;
+} Instance;
 
 typedef struct
 {
@@ -38,17 +43,17 @@ typedef struct
    Eina_Stringshare *master_name;
    Eina_Bool master_dir_ok;
    Eina_List *machs; /* List of Repo_Mach */
+
+   Instance *inst;
 } Repo;
 
 typedef struct
 {
-   E_Gadcon_Client *gcc;
-   Evas_Object *o_icon;
-   E_Menu *menu;
+   Eina_Stringshare *name;
+   Sync_Status status;
 
-   Ecore_Exe *sync_exe;
-   Eina_List *repos; /* List of Repo */
-} Instance;
+   Repo *repo;
+} Repo_Mach;
 
 #define PRINT _printf
 
@@ -69,10 +74,11 @@ static int
 _printf(const char *fmt, ...)
 {
    static FILE *fp = NULL;
-   char printf_buf[1024];
+   static char *printf_buf = NULL;
    va_list args;
    int printed;
 
+   if (!printf_buf) printf_buf = malloc(50000);
    if (!fp)
      {
         char path[1024];
@@ -84,7 +90,7 @@ _printf(const char *fmt, ...)
    printed = vsprintf(printf_buf, fmt, args);
    va_end(args);
 
-   fwrite(printf_buf, 1, strlen(printf_buf), fp);
+   fwrite(printf_buf, 1, printed, fp);
    fflush(fp);
 
    return printed;
@@ -110,7 +116,8 @@ _cmd_output_cb(void *data, int type EINA_UNUSED, void *event)
    Instance *inst = ecore_exe_data_get(exe);
    if (!inst || inst != data) return ECORE_CALLBACK_PASS_ON;
 
-   PRINT("%d %s\n", __LINE__, str);
+   PRINT("%*s", event_data->size, str);
+   if (inst->sync_exe == exe) return ECORE_CALLBACK_DONE;
    while (str && *str != '\0')
      {
         Eina_List *itr;
@@ -137,6 +144,7 @@ _cmd_output_cb(void *data, int type EINA_UNUSED, void *event)
            if (!strncmp(r->name, str, tmp - str)) goto repo_found;
         r = calloc(1, sizeof(*r));
         r->name = eina_stringshare_add_length(str, tmp - str);
+        r->inst = inst;
         inst->repos = eina_list_append(inst->repos, r);
 
 repo_found:
@@ -169,6 +177,7 @@ repo_found:
 
                   m = calloc(1, sizeof(*m));
                   m->name = eina_stringshare_add_length(str, tmp - str);
+                  m->repo = r;
                   r->machs = eina_list_append(r->machs, m);
 
 mach_found:
@@ -180,6 +189,7 @@ mach_found:
                      case '?': m->status = SYNC_FAILED; break;
                      default: goto end;
                     }
+                  PRINT("Repo %s Mach %s status %d\n", r->name, m->name, m->status);
                }
              str = tmp + 2 + 1;
           }
@@ -267,6 +277,37 @@ _status_icon_get(Sync_Status status)
 }
 
 static void
+_show_diff_cb(void *data, E_Menu *menu EINA_UNUSED, E_Menu_Item *menu_item EINA_UNUSED)
+{
+   char cmd[512];
+   Repo_Mach *rmach = data;
+   Repo *r = rmach->repo;
+   Instance *inst = r->inst;
+   sprintf(cmd, "zync --check push %s %s", r->name, rmach->name);
+
+   inst->sync_exe = ecore_exe_pipe_run(cmd,
+         ECORE_EXE_PIPE_READ | ECORE_EXE_PIPE_ERROR | ECORE_EXE_USE_SH,
+         inst);
+   efl_wref_add(inst->sync_exe, &(inst->sync_exe));
+}
+
+static void
+_update_cb(void *data, E_Menu *menu EINA_UNUSED, E_Menu_Item *menu_item EINA_UNUSED)
+{
+   char cmd[512];
+   Repo_Mach *rmach = data;
+   Repo *r = rmach->repo;
+   Instance *inst = r->inst;
+   sprintf(cmd, "zync push %s %s", r->name, rmach->name);
+   PRINT("%s\n", cmd);
+
+   inst->sync_exe = ecore_exe_pipe_run(cmd,
+         ECORE_EXE_PIPE_READ | ECORE_EXE_PIPE_ERROR | ECORE_EXE_USE_SH,
+         inst);
+   efl_wref_add(inst->sync_exe, &(inst->sync_exe));
+}
+
+static void
 _button_cb_mouse_down(void *data, Evas *e EINA_UNUSED, Evas_Object *obj EINA_UNUSED, void *event_info)
 {
    Instance *inst;
@@ -280,7 +321,7 @@ _button_cb_mouse_down(void *data, Evas *e EINA_UNUSED, Evas_Object *obj EINA_UNU
         char buf[1024];
         Eina_List *itr, *itr2;
         Repo *r;
-        E_Menu *m, *m2;
+        E_Menu *m, *m2, *m3;
         int x, y;
 
         m = e_menu_new();
@@ -288,7 +329,7 @@ _button_cb_mouse_down(void *data, Evas *e EINA_UNUSED, Evas_Object *obj EINA_UNU
           {
              Sync_Status repo_status = r->master_dir_ok ? SYNC_OK : SYNC_NO_DIR;
              Repo_Mach *rmach;
-             E_Menu_Item *mi, *mi2;
+             E_Menu_Item *mi, *mi2, *mi3;
              char lb_text[256];
              sprintf(lb_text, "%s (%s)", r->name, r->master_name);
              mi = e_menu_item_new(m);
@@ -308,8 +349,20 @@ _button_cb_mouse_down(void *data, Evas *e EINA_UNUSED, Evas_Object *obj EINA_UNU
                        snprintf(buf, sizeof(buf), "%s/%s", e_module_dir_get(_module), icon_name);
                        e_menu_item_icon_file_set(mi2, buf);
                     }
+                  if (!inst->sync_exe && r->master_dir_ok && rmach->status == SYNC_NEEDED)
+                    {
+                       m3 = e_menu_new();
+                       e_menu_item_submenu_set(mi2, m3);
+                       mi3 = e_menu_item_new(m3);
+                       e_menu_item_label_set(mi3, "Show diff");
+                       e_menu_item_callback_set(mi3, _show_diff_cb, rmach);
+
+                       mi3 = e_menu_item_new(m3);
+                       e_menu_item_label_set(mi3, "Update");
+                       e_menu_item_callback_set(mi3, _update_cb, rmach);
+                    }
+
                   if (repo_status < rmach->status) repo_status = rmach->status;
-//                  e_menu_item_callback_set(mi2, _image_selected, dev);
                }
 
              snprintf(buf, sizeof(buf), "%s/%s", e_module_dir_get(_module), _status_icon_get(repo_status));
@@ -351,11 +404,11 @@ _gc_init(E_Gadcon *gc, const char *name, const char *id, const char *style)
    ecore_event_handler_add(ECORE_EXE_EVENT_ERROR, _cmd_output_cb, inst);
    ecore_event_handler_add(ECORE_EXE_EVENT_DEL, _cmd_end_cb, inst);
 
-   inst->sync_exe = ecore_exe_pipe_run("zync --delim daemon",
+   inst->daemon_exe = ecore_exe_pipe_run("zync --delim daemon",
          ECORE_EXE_PIPE_READ | ECORE_EXE_PIPE_ERROR | ECORE_EXE_USE_SH,
          inst);
-   PRINT("EXE %p\n", inst->sync_exe);
-   efl_wref_add(inst->sync_exe, &(inst->sync_exe));
+   PRINT("EXE %p\n", inst->daemon_exe);
+   efl_wref_add(inst->daemon_exe, &(inst->daemon_exe));
 
    return gcc;
 }
@@ -364,7 +417,7 @@ static void
 _gc_shutdown(E_Gadcon_Client *gcc)
 {
    Instance *inst = gcc->data;
-   ecore_exe_kill(inst->sync_exe);
+   ecore_exe_kill(inst->daemon_exe);
    _instance_delete(inst);
 }
 
